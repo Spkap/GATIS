@@ -1,4 +1,4 @@
-# GA-TIS Project (Generative Adversarial Text-to-Image Synthesis)
+# GA-TIS Frontend
 
 ## Overview
 
@@ -92,18 +92,3 @@ The project uses CSS variables for theming, which are defined in the `src/styles
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
-
-## Team
-
-### Mentors
-
-- [Aaryan Patil](https://www.linkedin.com/in/aaryan-patil-ds01/)
-- [Vedanth Nanesh](https://www.linkedin.com/in/vedanth-nanesha-0591a42b4)
-
-### Mentees
-
-- [Sourabh Kapure](https://www.linkedin.com/in/sourabh-kapure)
-- [Akshaj Polisetty](https://www.linkedin.com/in/akshaj-pvy-030266290)
-- [Sarayu Narayanan](https://www.linkedin.com/in/sarayu-narayanan-13ab41324)
-- [Sambhav Purohit](https://www.linkedin.com/in/sambhav-purohit)
-- [Varshini Pateel](https://www.linkedin.com/in/varshini-reddy-pateel-311460290)
