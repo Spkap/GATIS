@@ -107,7 +107,3 @@ The project uses CSS variables for theming, which are defined in the `src/styles
 - [Sarayu Narayanan](https://www.linkedin.com/in/sarayu-narayanan-13ab41324)
 - [Sambhav Purohit](https://www.linkedin.com/in/sambhav-purohit)
 - [Varshini Pateel](https://www.linkedin.com/in/varshini-reddy-pateel-311460290)
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
