@@ -110,3 +110,46 @@ Desktop.ini
 /Frontend/dist/
 /Frontend/dist-ssr/
 /Frontend/stats.html
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+.venv
+fastapi-env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# FastAPI specific
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+
+# Alembic migrations
+alembic/versions/__pycache__/
+
+# Conda environment
+conda-meta/
