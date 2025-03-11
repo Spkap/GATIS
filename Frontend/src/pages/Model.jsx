@@ -1,48 +1,77 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { generateImage, getImageUrl } from '../api/api'; 
 
 export default function Model() {
   const [inputText, setInputText] = useState('');
   const [generatedImage, setGeneratedImage] = useState('');
   const [history, setHistory] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const isAuthenticated = localStorage.getItem('isAuthenticated');
-    if (!isAuthenticated) {
+    const authToken = localStorage.getItem('authToken');
+
+    if (!isAuthenticated || !authToken) {
       navigate('/login');
       return;
     }
-    
-    const savedHistory = JSON.parse(localStorage.getItem('imageHistory') || '[]');
+
+    const savedHistory = JSON.parse(
+      localStorage.getItem('imageHistory') || '[]',
+    );
     setHistory(savedHistory);
   }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const mockImageUrl = `/images/placeholder-${Math.floor(Math.random() * 5) + 1}.jpg`;
-    setGeneratedImage(mockImageUrl);
-    
-    const newHistoryItem = {
-      id: Date.now(),
-      inputText,
-      imageUrl: mockImageUrl,
-      createdAt: new Date().toISOString()
-    };
-    
-    const updatedHistory = [newHistoryItem, ...history];
-    localStorage.setItem('imageHistory', JSON.stringify(updatedHistory));
-    setHistory(updatedHistory);
+    setIsLoading(true);
+
+    try {
+      const authToken = localStorage.getItem('authToken');
+
+      if (!authToken) {
+        throw new Error('Authentication token not found');
+      }
+
+      const response = await generateImage(inputText, authToken);
+
+      console.log('Generation response:', response);
+
+
+      const imagePathOrUrl = response.image_url;
+
+      const imageUrl = getImageUrl(imagePathOrUrl);
+
+      setGeneratedImage(imageUrl);
+
+      const newHistoryItem = {
+        id: Date.now(),
+        inputText,
+        imageUrl,
+        timestamp: new Date().toISOString(),
+      };
+
+      const updatedHistory = [newHistoryItem, ...history];
+      setHistory(updatedHistory);
+      localStorage.setItem('imageHistory', JSON.stringify(updatedHistory));
+    } catch (error) {
+      console.error('Generation failed:', error);
+      alert(`Failed to generate image: ${error.message || 'Please try again'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDownload = () => {
     const link = document.createElement('a');
     link.href = generatedImage;
-    link.download = 'generated-image.jpg';
+    link.download = `gatis-${Date.now()}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -59,9 +88,12 @@ export default function Model() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             required
+            disabled={isLoading}
           />
         </div>
-        <Button type="submit">Generate Image</Button>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? 'Generating...' : 'Generate Image'}
+        </Button>
       </form>
 
       {generatedImage && (
