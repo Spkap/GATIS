@@ -3,8 +3,6 @@ import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 
 const Home = () => {
-  const isAuthenticated = localStorage.getItem('isAuthenticated');
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
@@ -132,14 +130,13 @@ const Home = () => {
               github.com/ga-tis
             </a>
           </p>
-          <p className="mb-2">Twitter:</p>
         </section>
 
-        {/* Sign Up Button */}
+        {/* Try Now Button */}
         <div className="text-center">
-          <Link to={isAuthenticated ? '/model' : '/signup'}>
+          <Link to="/model">
             <Button className="px-6 py-2 bg-[#1f2937] text-white hover:bg-[#2d3748]">
-              {isAuthenticated ? 'Go to Model Interface' : 'Sign Up for Access'}
+              Try Text-to-Image Model
             </Button>
           </Link>
         </div>

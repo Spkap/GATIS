@@ -1,55 +1,33 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { generateImage, getImageUrl } from '../api/api'; 
+import { generateImage } from '../api/api';
 
 export default function Model() {
   const [inputText, setInputText] = useState('');
   const [generatedImage, setGeneratedImage] = useState('');
   const [history, setHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const navigate = useNavigate();
 
+  // Load history from localStorage on component mount
   useEffect(() => {
-    const isAuthenticated = localStorage.getItem('isAuthenticated');
-    const authToken = localStorage.getItem('authToken');
-
-    if (!isAuthenticated || !authToken) {
-      navigate('/login');
-      return;
-    }
-
     const savedHistory = JSON.parse(
       localStorage.getItem('imageHistory') || '[]',
     );
     setHistory(savedHistory);
-  }, [navigate]);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const authToken = localStorage.getItem('authToken');
-
-      if (!authToken) {
-        throw new Error('Authentication token not found');
-      }
-
-      const response = await generateImage(inputText, authToken);
-
-      console.log('Generation response:', response);
-
-
-      const imagePathOrUrl = response.image_url;
-
-      const imageUrl = getImageUrl(imagePathOrUrl);
-
+      // Call the simplified API without authentication token
+      const imageUrl = await generateImage(inputText);
       setGeneratedImage(imageUrl);
 
+      // Update history
       const newHistoryItem = {
         id: Date.now(),
         inputText,
@@ -71,7 +49,7 @@ export default function Model() {
   const handleDownload = () => {
     const link = document.createElement('a');
     link.href = generatedImage;
-    link.download = `gatis-${Date.now()}.jpg`;
+    link.download = `gatis-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -79,7 +57,21 @@ export default function Model() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">GA-TIS Model</h1>
+      <h1 className="text-3xl font-bold mb-6">Text to Image Synthesis</h1>
+
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+        <h2 className="text-xl font-semibold mb-2">About this Model</h2>
+        <p>
+          This model generates bird images based on text descriptions. Try
+          describing a bird with details about its colors, features, or habitat.
+        </p>
+        <p className="mt-2">
+          <strong>Example prompts:</strong> "A red bird with a black head", "A
+          small blue bird in a forest setting", "A yellow bird with spotted
+          wings"
+        </p>
+      </div>
+
       <form onSubmit={handleSubmit} className="mb-8">
         <div className="mb-4">
           <Label htmlFor="inputText">Enter text description</Label>
@@ -89,6 +81,7 @@ export default function Model() {
             onChange={(e) => setInputText(e.target.value)}
             required
             disabled={isLoading}
+            placeholder="Describe a bird you want to generate..."
           />
         </div>
         <Button type="submit" disabled={isLoading}>
@@ -110,18 +103,24 @@ export default function Model() {
 
       <div>
         <h2 className="text-2xl font-semibold mb-4">History</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {history.map((item) => (
-            <div key={item.id} className="border p-4 rounded">
-              <img
-                src={item.imageUrl}
-                alt="Generated"
-                className="w-full h-auto"
-              />
-              <p className="mt-2 text-sm truncate">{item.inputText}</p>
-            </div>
-          ))}
-        </div>
+        {history.length === 0 ? (
+          <p className="text-gray-500">
+            No generated images yet. Try creating one!
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {history.map((item) => (
+              <div key={item.id} className="border p-4 rounded">
+                <img
+                  src={item.imageUrl}
+                  alt="Generated"
+                  className="w-full h-auto"
+                />
+                <p className="mt-2 text-sm truncate">{item.inputText}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

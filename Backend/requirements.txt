@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+torch
+torchvision
+open_clip_torch
+Pillow
+python-multipart
+# Add specific versions if needed, e.g.:
+# torch==1.13.1
+# open_clip_torch==2.7.0

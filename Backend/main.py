@@ -1,171 +1,170 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
 import os
-import uvicorn
-import jwt
-from datetime import datetime, timedelta
-from typing import Optional
+import torch
+import torch.nn as nn  # Although not defining classes, good to have for type hints if desired
+import torchvision.transforms as transforms
+import open_clip  # Use open_clip library
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse  # Sends back image bytes directly
+from fastapi.middleware.cors import CORSMiddleware  # For React integration
+from pydantic import BaseModel
+from PIL import Image
+from io import BytesIO  # To handle image bytes in memory
+import time
+import logging
 
-# Import model and database functions
-from model import generate_image, load_gan_model
-from database import get_user, create_user, verify_password, init_db, update_generation_count
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(title="GATIS Text-to-Image API")
+# --- Configuration ---
+# Use relative paths assuming main.py is in the project root
+MODEL_DIR = "models_clip_jit"
+JIT_GENERATOR_PATH = os.path.join(MODEL_DIR, "generator_clip_final_jit.pt")  # Make sure filename matches
 
-# Configure CORS
+# CLIP Configuration (Must match what was used in the notebook's inference example)
+CLIP_MODEL_NAME = 'ViT-B-32'
+CLIP_PRETRAINED = 'laion2b_s34b_b79k'
+
+LATENT_DIM = 100  # Latent dimension used during training
+
+# Determine device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger.info(f"Using device: {device}")
+
+# --- Global Variables for Loaded Models ---
+# Load models ONCE at startup to be efficient
+generator_jit: torch.jit.ScriptModule = None
+clip_model: nn.Module = None
+clip_tokenizer = None
+
+# --- Load Models Function ---
+def load_models():
+    """Loads the JIT Generator and CLIP components."""
+    global generator_jit, clip_model, clip_tokenizer
+    logger.info("Loading models...")
+    try:
+        # Load TorchScript Generator
+        if not os.path.exists(JIT_GENERATOR_PATH):
+             raise FileNotFoundError(f"JIT Generator model not found at {JIT_GENERATOR_PATH}")
+        generator_jit = torch.jit.load(JIT_GENERATOR_PATH, map_location=device)
+        generator_jit.eval()  # Ensure evaluation mode
+        logger.info("JIT Generator loaded successfully.")
+
+        # Load CLIP model and tokenizer for text encoding
+        logger.info(f"Loading CLIP model: {CLIP_MODEL_NAME} ({CLIP_PRETRAINED})")
+        clip_model, _, _ = open_clip.create_model_and_transforms(CLIP_MODEL_NAME, pretrained=CLIP_PRETRAINED)
+        clip_tokenizer = open_clip.get_tokenizer(CLIP_MODEL_NAME)
+        clip_model = clip_model.to(device).eval()
+        logger.info("CLIP Model and Tokenizer loaded successfully.")
+
+    except FileNotFoundError as e:
+        logger.error(f"Model file not found: {e}")
+        raise RuntimeError(f"Could not load models due to missing file: {e}") from e
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during model loading: {e}", exc_info=True)
+        raise RuntimeError(f"Model loading failed unexpectedly: {e}") from e
+
+# --- FastAPI App Initialization ---
+app = FastAPI(title="Bird Text-to-Image API (CLIP+JIT)", version="1.0.0")
+
+# --- CORS Middleware (Essential for React Frontend) ---
+# Define the origins allowed to access your backend.
+# For development, allow localhost from the typical React port (3000).
+# For production, replace/add your actual frontend domain.
+origins = [
+    "http://localhost:3000",  # Default React development server
+    "http://localhost:3001",  # Another common React dev port
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",  # Vite default port
+    # "https://your-react-frontend-domain.com", # Add your production domain here
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
 )
 
-os.makedirs("output_images", exist_ok=True)
 
-# JWT Configuration
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-# Models
-class User(BaseModel):
-    username: str
-    email: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class TokenData(BaseModel):
-    username: Optional[str] = None
-
+# --- Request Body Model ---
 class TextPrompt(BaseModel):
-    prompt: str
+    text: str
 
-# Authentication functions
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+# --- Inference Function ---
+def generate_image_api(text_prompt: str) -> Image.Image:
+    """Generates a PIL Image from text using globally loaded models."""
+    if generator_jit is None or clip_model is None or clip_tokenizer is None:
+         logger.error("Models not loaded before inference call.")
+         raise HTTPException(status_code=503, detail="Models are not ready. Please try again later.")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    start_time = time.time()
+    logger.info(f"Received generation request for prompt: '{text_prompt}'")
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except jwt.PyJWTError:
-        raise credentials_exception
-    user = get_user(username=token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
+        # 1. Encode Text using CLIP
+        with torch.no_grad():
+            # Tokenize requires a list of strings
+            text_tokens = clip_tokenizer([text_prompt]).to(device)
+            # Encode text
+            text_embedding = clip_model.encode_text(text_tokens)  # Shape: [1, 512]
 
-# Root endpoint
-@app.get("/")
-async def root():
-    return {"message": "Welcome to GATIS Text-to-Image API"}
+        # 2. Generate Noise
+        noise = torch.randn(1, LATENT_DIM, device=device)  # Shape: [1, 100]
 
-# Authentication routes
-@app.post("/signup", response_model=dict)
-async def signup_user(user: User):
-    db_user = get_user(user.username)
-    if db_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
-        )
-    
-    success = create_user(user.username, user.email, user.password)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user"
-        )
-    
-    return {"message": "User created successfully"}
+        # 3. Generate Image using JIT Generator
+        with torch.no_grad():
+            fake_image_tensor = generator_jit(noise, text_embedding)  # Pass noise and embedding
 
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = get_user(form_data.username)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if not verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user["username"]}, expires_delta=access_token_expires
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer", "username": user["username"]}
+        # 4. Post-process tensor to PIL Image
+        # De-normalize from [-1, 1] to [0, 1], convert to CPU, clamp, and make PIL image
+        processed_image = fake_image_tensor[0].cpu().mul(0.5).add(0.5).clamp(0, 1)
+        pil_image = transforms.ToPILImage()(processed_image)
 
-# Text-to-Image generation endpoint
-@app.post("/generate")
-async def generate_image_endpoint(text_prompt: TextPrompt, current_user: dict = Depends(get_current_user)):
-    try:
-        if current_user.get("generations", 0) >= 100:
-            raise HTTPException(status_code=402, detail="Generation limit reached")
-            
-        image_filename = generate_image(text_prompt.prompt)
-        
-        update_generation_count(current_user["username"])
-        
-        return {
-            "message": "Image generated successfully",
-            "image_url": f"/images/{image_filename}",
-            "username": current_user["username"]
-        }
+        end_time = time.time()
+        logger.info(f"Image generated successfully in {end_time - start_time:.2f} seconds.")
+        return pil_image
+
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Image generation failed: {str(e)}"
-        )
+        logger.error(f"Error during image generation for prompt '{text_prompt}': {e}", exc_info=True)
+        # Re-raise as HTTPException for FastAPI to handle and return error to client
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {e}")
 
-# Endpoint to serve generated images
-@app.get("/images/{image_name}")
-async def get_image(image_name: str):
-    image_path = f"output_images/{image_name}"
-    if not os.path.exists(image_path):
-        raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(image_path)
-
-# Initialize model and database when app starts
+# --- API Endpoints ---
 @app.on_event("startup")
 async def startup_event():
-    init_db()
-    
-    load_gan_model()
-    print("Database initialized, model loaded, and API ready")
+    """Load models when the FastAPI application starts."""
+    load_models()
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+@app.get("/", summary="Root endpoint", tags=["General"])
+async def read_root():
+    """Provides a simple welcome message."""
+    return {"message": "Welcome to the Bird Text-to-Image API (CLIP+JIT)! Use the /generate-image/ endpoint (POST)."}
+
+@app.post("/generate-image/", response_class=StreamingResponse, summary="Generate Image from Text", tags=["Image Generation"])
+async def generate_image_endpoint(prompt: TextPrompt):
+    """
+    Accepts a JSON payload with a 'text' field containing the prompt,
+    generates a bird image based on the prompt, and returns the image as a PNG stream.
+    """
+    if not prompt.text or not prompt.text.strip():
+        raise HTTPException(status_code=400, detail="Text prompt cannot be empty.")
+
+    logger.info(f"Processing request for prompt: {prompt.text}")
+    pil_image = generate_image_api(prompt.text)  # Call the core generation logic
+
+    # Save PIL image to a bytes buffer in PNG format
+    img_byte_arr = BytesIO()
+    pil_image.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)  # Important: Rewind buffer to the beginning before sending
+
+    # Return image bytes as a streaming response
+    return StreamingResponse(img_byte_arr, media_type="image/png")
+
+# --- Run Instruction ---
+# To run this app locally (after installing requirements):
+# Open your terminal in the 'Backend' directory (where main.py is)
+# Run: uvicorn main:app --reload --port 8000
+# --reload is optional, useful for development
+# The API will be available at http://127.0.0.1:8000
+# Access the interactive documentation (Swagger UI) at http://127.0.0.1:8000/docs

@@ -67,8 +67,6 @@ http://localhost:5173
 ### Core Features
 
 - Text-to-image synthesis using GANs
-- User authentication
-- Image generation history management
 - Responsive UI with Tailwind CSS
 - Component library built with shadcn/ui
 
